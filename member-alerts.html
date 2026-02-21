@@ -7,9 +7,8 @@
   <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0b0f19" />
   <title>My GPS Map with Geofences</title>
 
-  <!-- Leaflet CSS -->
+  <!-- ✅ Correct Leaflet include -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-
   <style>
     /* 1) Reset + base */
     *, *::before, *::after { box-sizing: border-box; }
@@ -103,36 +102,18 @@
       background: var(--surface);
       min-inline-size: 0;
     }
-    legend {
-      padding: 0 var(--space-2);
-      font-weight: 650;
-      color: var(--text);
-    }
+    legend { padding: 0 var(--space-2); font-weight: 650; color: var(--text); }
 
-    label {
-      display: block;
-      font-size: 0.92rem;
-      margin-bottom: 4px;
-      color: var(--text);
-    }
+    label { display: block; font-size: 0.92rem; margin-bottom: 4px; color: var(--text); }
     .inline {
-      display: grid;
-      grid-template-columns: 1fr auto;
-      gap: 8px;
-      align-items: center;
+      display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center;
     }
-    input[type="number"], select, input[type="checkbox"] {
-      height: var(--control-height);
-    }
+    input[type="number"], select, input[type="checkbox"] { height: var(--control-height); }
     input[type="number"], select {
-      width: 100%;
-      padding: 0 var(--space-2);
+      width: 100%; padding: 0 var(--space-2);
       border-radius: calc(var(--radius) - 4px);
       border: 1px solid var(--border);
-      background: var(--bg);
-      color: var(--text);
-      outline: none;
-      appearance: none;
+      background: var(--bg); color: var(--text); outline: none; appearance: none;
     }
     input[type="number"]::-webkit-outer-spin-button,
     input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
@@ -143,102 +124,56 @@
 
     button {
       height: var(--control-height);
-      border: none;
-      border-radius: calc(var(--radius) - 4px);
-      background: var(--brand);
-      color: #fff;
-      font-weight: 600;
-      letter-spacing: 0.2px;
-      padding: 0 var(--space-3);
-      touch-action: manipulation;
+      border: none; border-radius: calc(var(--radius) - 4px);
+      background: var(--brand); color: #fff; font-weight: 600; letter-spacing: 0.2px;
+      padding: 0 var(--space-3); touch-action: manipulation;
     }
     button:disabled { opacity: 0.55; filter: grayscale(0.1); }
-    .btn-secondary {
-      background: color-mix(in oklab, var(--brand) 20%, var(--surface));
-      color: var(--text);
-      border: 1px solid var(--border);
-    }
-    .btn-ghost {
-      background: transparent;
-      color: var(--text);
-      border: 1px dashed var(--border);
-    }
-    .row {
-      display: grid;
-      grid-template-columns: 1fr 1fr 1fr;
-      gap: var(--space-2);
-    }
-    @media (max-width: 520px) {
-      .row { grid-template-columns: 1fr 1fr; }
-    }
+    .btn-secondary { background: color-mix(in oklab, var(--brand) 20%, var(--surface)); color: var(--text); border: 1px solid var(--border); }
+    .btn-ghost     { background: transparent; color: var(--text); border: 1px dashed var(--border); }
+
+    .row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: var(--space-2); }
+    @media (max-width: 520px) { .row { grid-template-columns: 1fr 1fr; } }
 
     .note { font-size: 0.86rem; color: var(--text-muted); margin: 6px 0 0 0; }
 
     /* Circles list */
     #circle-list { margin-top: 10px; display: grid; gap: 8px; }
     .circle-row {
-      display: grid;
-      grid-template-columns: 1fr auto auto;
-      gap: 8px;
-      align-items: center;
-      font-size: 0.95rem;
+      display: grid; grid-template-columns: 1fr auto auto; gap: 8px; align-items: center; font-size: 0.95rem;
     }
     .circle-row code {
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
       background: color-mix(in oklab, var(--surface) 90%, transparent);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 6px 8px;
-      color: var(--text);
+      border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; color: var(--text);
     }
-    .circle-row .mini {
-      height: 34px;
-      padding: 0 10px;
-      font-size: 0.85rem;
-      border-radius: 8px;
-    }
+    .circle-row .mini { height: 34px; padding: 0 10px; font-size: 0.85rem; border-radius: 8px; }
 
     /* Alerts (toast) */
     #toast-container {
       position: fixed;
       bottom: calc(10px + var(--safe-bottom));
-      left: 50%;
-      transform: translateX(-50%);
-      display: grid;
-      gap: 8px;
-      z-index: 9999;
-      width: min(92vw, 520px);
+      left: 50%; transform: translateX(-50%);
+      display: grid; gap: 8px; z-index: 9999; width: min(92vw, 520px);
       pointer-events: none; /* clicks pass through */
     }
     .toast {
       pointer-events: auto;
-      border-radius: 10px;
-      padding: 10px 12px;
-      color: #fff;
-      font-weight: 600;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      box-shadow: 0 10px 30px rgba(0,0,0,0.25);
-      animation: slideUp 220ms ease-out;
+      border-radius: 10px; padding: 10px 12px; color: #fff; font-weight: 600;
+      display: flex; align-items: center; justify-content: space-between;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.25); animation: slideUp 220ms ease-out;
     }
     .toast.enter { background: linear-gradient(135deg, var(--success), #0a7a42); }
     .toast.exit  { background: linear-gradient(135deg, var(--warning), #c27a0e); }
-    .toast small { font-weight: 500; opacity: 0.95; }
-    @keyframes slideUp {
-      from { transform: translate(-50%, 8px); opacity: 0; }
-      to   { transform: translate(-50%, 0); opacity: 1; }
-    }
+    .toast small { font-weight: 500; opacity: 0.95; cursor: pointer; }
+    @keyframes slideUp { from { transform: translate(-50%, 8px); opacity: 0; } to { transform: translate(-50%, 0); opacity: 1; } }
 
     /* Events log */
     #event-log { margin-top: 10px; display: grid; gap: 6px; }
     .event-row {
-      font-size: 0.9rem;
-      color: var(--text);
+      font-size: 0.9rem; color: var(--text);
       background: color-mix(in oklab, var(--surface) 88%, transparent);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 6px 8px;
+      border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px;
     }
 
     /* Leaflet theme bits */
@@ -252,9 +187,7 @@
       padding: 2px 6px; border-radius: 8px; border: 1px solid var(--border);
     }
 
-    @supports (-webkit-touch-callout: none) {
-      .app { min-height: -webkit-fill-available; }
-    }
+    @supports (-webkit-touch-callout: none) { .app { min-height: -webkit-fill-available; } }
   </style>
 </head>
 <body>
@@ -333,7 +266,7 @@
   <!-- Toasts -->
   <div id="toast-container" aria-live="polite" aria-atomic="true"></div>
 
-  <!-- Leaflet JS -->
+  <!-- ✅ Correct Leaflet include -->
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
   <script>
@@ -446,7 +379,7 @@
       const div = document.createElement('div');
       div.className = `toast ${kind}`;
       div.innerHTML = `<span>${msg}</span> <small>Dismiss</small>`;
-      div.addEventListener('click', () => div.remove());
+      div.querySelector('small').addEventListener('click', () => div.remove());
       toastContainer.appendChild(div);
       setTimeout(() => div.remove(), 4500);
     }
@@ -471,7 +404,7 @@
 
     // System Notification
     async function maybeNotify(title, body) {
-      if (!notifyEl.checked) return;
+      if (!document.getElementById('alert-notify').checked) return;
       if (!('Notification' in window)) return;
       if (Notification.permission === 'granted') {
         new Notification(title, { body });
@@ -512,7 +445,7 @@
       const rows = circles.map(c => {
         const lat = c.lat.toFixed(5);
         const lng = c.lng.toFixed(5);
-        const rDisp = c.unit === 'ft' ? Math.round(c.displayRadius) : Math.round(c.displayRadius);
+        const rDisp = Math.round(c.displayRadius);
         const unit = c.unit;
         return `
           <div class="circle-row" data-id="${c.id}">
@@ -630,7 +563,6 @@
         headingArrow = null;
       }
 
-      useMyPosBtn.disabled = true === false ? false : false; // no-op to keep linter happy
       useMyPosBtn.disabled = false;
       recenterBtn.disabled = false;
 
@@ -653,3 +585,123 @@
           onGeofenceEvent('enter', c, { userLat, userLng, d, accuracyM });
         } else if (c.inside && d > exitThreshold) {
           c.inside = false;
+          onGeofenceEvent('exit', c, { userLat, userLng, d, accuracyM });
+        }
+      }
+    }
+
+    function onGeofenceEvent(type, circle, ctx) {
+      const title = type === 'enter' ? 'Entered circle' : 'Exited circle';
+      const msg = `${title} #${circle.id} • d=${Math.round(ctx.d)}m`;
+
+      // Toast
+      showToast(type === 'enter' ? 'enter' : 'exit', msg);
+
+      // Sound
+      if (soundEl.checked) playChime();
+
+      // Vibrate
+      if (vibrateEl.checked && 'vibrate' in navigator) {
+        if (type === 'enter') navigator.vibrate([30, 40, 30]);
+        else navigator.vibrate([50, 50, 50]);
+      }
+
+      // System notification (if enabled and permitted)
+      maybeNotify(title, `Distance ${Math.round(ctx.d)} m; accuracy ±${Math.round(ctx.accuracyM)} m`);
+
+      // Log
+      logEvent({
+        ts: Date.now(),
+        type,
+        circleId: circle.id,
+        lat: ctx.userLat,
+        lng: ctx.userLng,
+        distance: ctx.d,
+        accuracy: ctx.accuracyM
+      });
+    }
+
+    function startTracking() {
+      if (!('geolocation' in navigator)) {
+        setStatus('Geolocation not supported');
+        return;
+      }
+      if (watchId !== null) return;
+
+      setStatus('Requesting location...');
+      watchId = navigator.geolocation.watchPosition(
+        (pos) => {
+          updateUserPosition(pos);
+          const latlng = [pos.coords.latitude, pos.coords.longitude];
+          if (!map._userHasMoved) {
+            map.setView(latlng, Math.max(map.getZoom(), 16), { animate: true });
+          }
+          setStatus(`Fix: ${latlng[0].toFixed(5)}, ${latlng[1].toFixed(5)} ±${Math.round(pos.coords.accuracy)}m`);
+        },
+        (err) => {
+          setStatus('Error: ' + err.message);
+          console.error(err);
+        },
+        { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 }
+      );
+
+      startBtn.disabled = true;
+      stopBtn.disabled = false;
+    }
+
+    function stopTracking() {
+      if (watchId !== null) {
+        navigator.geolocation.clearWatch(watchId);
+        watchId = null;
+        setStatus('Tracking stopped');
+      }
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
+    }
+
+    // Wire up controls
+    document.getElementById('start').addEventListener('click', startTracking);
+    document.getElementById('stop').addEventListener('click', stopTracking);
+    document.getElementById('recenter').addEventListener('click', () => {
+      if (userMarker) { map.setView(userMarker.getLatLng(), Math.max(map.getZoom(), 16), { animate: true }); }
+    });
+    document.getElementById('add-circle').addEventListener('click', () => {
+      const lat = parseFloat(latInput.value);
+      const lng = parseFloat(lngInput.value);
+      const radiusValue = parseFloat(radiusInput.value);
+      const unit = unitSelect.value; // 'm' or 'ft'
+      addCircleAt(lat, lng, radiusValue, unit);
+    });
+    document.getElementById('clear-circles').addEventListener('click', () => {
+      geofenceGroup.clearLayers();
+      circles = [];
+      renderCircleList();
+    });
+    document.getElementById('use-my-pos').addEventListener('click', () => {
+      if (!userMarker) return;
+      const { lat, lng } = userMarker.getLatLng();
+      latInput.value = lat.toFixed(6);
+      lngInput.value = lng.toFixed(6);
+    });
+
+    // Alerts toggles
+    document.getElementById('enable-alerts').addEventListener('change', (e) => {
+      showToast(e.target.checked ? 'enter' : 'exit', e.target.checked ? 'Alerts enabled' : 'Alerts disabled');
+    });
+    document.getElementById('alert-notify').addEventListener('change', async (e) => {
+      if (e.target.checked && 'Notification' in window) {
+        try { await Notification.requestPermission(); } catch {}
+      }
+    });
+    testAlertBtn.addEventListener('click', () => {
+      onGeofenceEvent('enter', { id: 0 }, { userLat: 0, userLng: 0, d: 12, accuracyM: 5 });
+      setTimeout(() => onGeofenceEvent('exit', { id: 0 }, { userLat: 0, userLng: 0, d: 25, accuracyM: 7 }), 1200);
+    });
+
+    // Start immediately + render empty states
+    startTracking();
+    renderCircleList();
+    renderEventLog();
+  </script>
+</body>
+</html>
