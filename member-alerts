@@ -1,0 +1,655 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff" />
+  <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0b0f19" />
+  <title>My GPS Map with Geofences</title>
+
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
+  <style>
+    /* 1) Reset + base */
+    *, *::before, *::after { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+      line-height: 1.4;
+      color: #111;
+      background: #fff;
+      -webkit-text-size-adjust: 100%;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    /* Safe areas + theme tokens */
+    :root {
+      --safe-top: env(safe-area-inset-top);
+      --safe-right: env(safe-area-inset-right);
+      --safe-bottom: env(safe-area-inset-bottom);
+      --safe-left: env(safe-area-inset-left);
+
+      --brand: #0b5ed7;
+      --accent: #d63384;
+      --success: #0f9d58;
+      --warning: #f39c12;
+
+      --bg: #ffffff;
+      --surface: #f7f7f9;
+      --border: #e5e7eb;
+      --text: #0f172a;
+      --text-muted: #6b7280;
+
+      --radius: 12px;
+      --space-2: clamp(10px, 1.8vw, 12px);
+      --space-3: clamp(12px, 2.4vw, 16px);
+      --control-height: 44px;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0b0f19;
+        --surface: #121826;
+        --border: #1f2937;
+        --text: #e5e7eb;
+        --text-muted: #9ca3af;
+      }
+      body { color: var(--text); background: var(--bg); }
+    }
+
+    /* 2) App layout: column; map height computed in JS so controls never cover it */
+    .app {
+      min-height: 100dvh;
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-3);
+      padding: max(var(--space-3), var(--safe-top))
+               max(var(--space-3), var(--safe-right))
+               max(var(--space-3), var(--safe-bottom))
+               max(var(--space-3), var(--safe-left));
+      background: var(--bg);
+    }
+
+    #map {
+      border-radius: var(--radius);
+      overflow: hidden;
+      outline: 1px solid var(--border);
+      background: #dcdcdc;
+      min-height: 50dvh; /* fallback minimum if JS hasn’t run yet */
+    }
+    @supports not (height: 1dvh) {
+      #map { min-height: 50vh; }
+    }
+
+    .controls {
+      display: grid;
+      gap: var(--space-3);
+      background: color-mix(in oklab, var(--bg) 92%, transparent);
+      backdrop-filter: saturate(1.05) blur(4px);
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      padding: var(--space-3);
+      grid-template-columns: 1fr;
+    }
+    @media (min-width: 980px) {
+      .controls { grid-template-columns: 1fr 1fr 1fr; }
+    }
+
+    fieldset {
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: var(--space-3);
+      background: var(--surface);
+      min-inline-size: 0;
+    }
+    legend {
+      padding: 0 var(--space-2);
+      font-weight: 650;
+      color: var(--text);
+    }
+
+    label {
+      display: block;
+      font-size: 0.92rem;
+      margin-bottom: 4px;
+      color: var(--text);
+    }
+    .inline {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px;
+      align-items: center;
+    }
+    input[type="number"], select, input[type="checkbox"] {
+      height: var(--control-height);
+    }
+    input[type="number"], select {
+      width: 100%;
+      padding: 0 var(--space-2);
+      border-radius: calc(var(--radius) - 4px);
+      border: 1px solid var(--border);
+      background: var(--bg);
+      color: var(--text);
+      outline: none;
+      appearance: none;
+    }
+    input[type="number"]::-webkit-outer-spin-button,
+    input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+    input[type="number"]:focus, select:focus {
+      border-color: color-mix(in oklab, var(--brand) 70%, var(--border));
+      box-shadow: 0 0 0 3px color-mix(in oklab, var(--brand) 20%, transparent);
+    }
+
+    button {
+      height: var(--control-height);
+      border: none;
+      border-radius: calc(var(--radius) - 4px);
+      background: var(--brand);
+      color: #fff;
+      font-weight: 600;
+      letter-spacing: 0.2px;
+      padding: 0 var(--space-3);
+      touch-action: manipulation;
+    }
+    button:disabled { opacity: 0.55; filter: grayscale(0.1); }
+    .btn-secondary {
+      background: color-mix(in oklab, var(--brand) 20%, var(--surface));
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+    .btn-ghost {
+      background: transparent;
+      color: var(--text);
+      border: 1px dashed var(--border);
+    }
+    .row {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: var(--space-2);
+    }
+    @media (max-width: 520px) {
+      .row { grid-template-columns: 1fr 1fr; }
+    }
+
+    .note { font-size: 0.86rem; color: var(--text-muted); margin: 6px 0 0 0; }
+
+    /* Circles list */
+    #circle-list { margin-top: 10px; display: grid; gap: 8px; }
+    .circle-row {
+      display: grid;
+      grid-template-columns: 1fr auto auto;
+      gap: 8px;
+      align-items: center;
+      font-size: 0.95rem;
+    }
+    .circle-row code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      background: color-mix(in oklab, var(--surface) 90%, transparent);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 6px 8px;
+      color: var(--text);
+    }
+    .circle-row .mini {
+      height: 34px;
+      padding: 0 10px;
+      font-size: 0.85rem;
+      border-radius: 8px;
+    }
+
+    /* Alerts (toast) */
+    #toast-container {
+      position: fixed;
+      bottom: calc(10px + var(--safe-bottom));
+      left: 50%;
+      transform: translateX(-50%);
+      display: grid;
+      gap: 8px;
+      z-index: 9999;
+      width: min(92vw, 520px);
+      pointer-events: none; /* clicks pass through */
+    }
+    .toast {
+      pointer-events: auto;
+      border-radius: 10px;
+      padding: 10px 12px;
+      color: #fff;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.25);
+      animation: slideUp 220ms ease-out;
+    }
+    .toast.enter { background: linear-gradient(135deg, var(--success), #0a7a42); }
+    .toast.exit  { background: linear-gradient(135deg, var(--warning), #c27a0e); }
+    .toast small { font-weight: 500; opacity: 0.95; }
+    @keyframes slideUp {
+      from { transform: translate(-50%, 8px); opacity: 0; }
+      to   { transform: translate(-50%, 0); opacity: 1; }
+    }
+
+    /* Events log */
+    #event-log { margin-top: 10px; display: grid; gap: 6px; }
+    .event-row {
+      font-size: 0.9rem;
+      color: var(--text);
+      background: color-mix(in oklab, var(--surface) 88%, transparent);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 6px 8px;
+    }
+
+    /* Leaflet theme bits */
+    .leaflet-container a { color: var(--brand); }
+    .leaflet-popup-content-wrapper, .leaflet-popup-tip {
+      background: var(--surface); color: var(--text); border: 1px solid var(--border);
+    }
+    .leaflet-control-attribution {
+      background: color-mix(in oklab, var(--bg) 80%, transparent) !important;
+      color: var(--text-muted) !important;
+      padding: 2px 6px; border-radius: 8px; border: 1px solid var(--border);
+    }
+
+    @supports (-webkit-touch-callout: none) {
+      .app { min-height: -webkit-fill-available; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app" id="app">
+    <div id="map"></div>
+
+    <div class="controls" id="controls">
+      <!-- Live Location -->
+      <fieldset>
+        <legend>Live Location</legend>
+        <div class="row">
+          <button id="start">Start Tracking</button>
+          <button id="stop" class="btn-secondary" disabled>Stop</button>
+          <button id="recenter" class="btn-ghost" disabled>Recenter</button>
+        </div>
+        <p class="note" id="status">Status: idle</p>
+      </fieldset>
+
+      <!-- Add Circle -->
+      <fieldset>
+        <legend>Add Circle</legend>
+        <label>Center Latitude
+          <input type="number" step="any" id="circle-lat" placeholder="e.g., 43.8561" />
+        </label>
+        <label>Center Longitude
+          <input type="number" step="any" id="circle-lng" placeholder="-79.3370" />
+        </label>
+        <label>Radius</label>
+        <div class="inline">
+          <input type="number" step="1" id="circle-radius" placeholder="100" value="100" />
+          <select id="circle-unit" aria-label="Radius unit">
+            <option value="m" selected>m</option>
+            <option value="ft">ft</option>
+          </select>
+        </div>
+        <div class="row" style="margin-top:8px;">
+          <button id="use-my-pos" class="btn-secondary" disabled>Use My Position</button>
+          <button id="add-circle">Add Circle</button>
+          <button id="clear-circles" class="btn-ghost">Clear Circles</button>
+        </div>
+        <p class="note">Tip: Long‑press on the map to add a circle at that spot.</p>
+
+        <!-- Circles list renders here -->
+        <div id="circle-list"></div>
+      </fieldset>
+
+      <!-- Alerts -->
+      <fieldset>
+        <legend>Alerts</legend>
+        <div class="row">
+          <label style="display:flex; align-items:center; gap:10px;">
+            <input type="checkbox" id="enable-alerts" />
+            Enable alerts
+          </label>
+          <label style="display:flex; align-items:center; gap:10px;">
+            <input type="checkbox" id="alert-sound" checked />
+            Sound
+          </label>
+          <label style="display:flex; align-items:center; gap:10px;">
+            <input type="checkbox" id="alert-vibrate" checked />
+            Vibrate
+          </label>
+        </div>
+        <div class="row" style="margin-top:8px;">
+          <label style="display:flex; align-items:center; gap:10px;">
+            <input type="checkbox" id="alert-notify" />
+            System notifications
+          </label>
+          <button id="test-alert" class="btn-secondary">Test Alert</button>
+        </div>
+        <div id="event-log"></div>
+      </fieldset>
+    </div>
+  </div>
+
+  <!-- Toasts -->
+  <div id="toast-container" aria-live="polite" aria-atomic="true"></div>
+
+  <!-- Leaflet JS -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <script>
+    // --- Constants for unit conversion ---
+    const METERS_PER_FOOT = 0.3048;
+    const FEET_PER_METER = 1 / METERS_PER_FOOT;
+
+    // --- Map setup ---
+    const map = L.map('map');
+    L.tileLayer(
+      'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+      { maxZoom: 19, attribution: '&copy; OpenStreetMap contributors' }
+    ).addTo(map);
+
+    // Default view (Markham area as a fallback)
+    map.setView([43.8561, -79.3370], 13);
+
+    // --- Live location layers ---
+    let watchId = null;
+    let userMarker = null;
+    let accuracyCircle = null;
+    let headingArrow = null;
+
+    // --- Geofence circles + state ---
+    const geofenceGroup = L.featureGroup().addTo(map);
+    const circleListEl = document.getElementById('circle-list');
+    const eventLogEl = document.getElementById('event-log');
+    let circles = [];  // Each: { id, lat, lng, radiusMeters, displayRadius, unit, layer, inside:false }
+    let nextId = 1;
+
+    // Controls
+    const statusEl = document.getElementById('status');
+    const startBtn = document.getElementById('start');
+    const stopBtn = document.getElementById('stop');
+    const recenterBtn = document.getElementById('recenter');
+    const useMyPosBtn = document.getElementById('use-my-pos');
+    const latInput = document.getElementById('circle-lat');
+    const lngInput = document.getElementById('circle-lng');
+    const radiusInput = document.getElementById('circle-radius');
+    const unitSelect = document.getElementById('circle-unit');
+
+    // Alerts controls
+    const enableAlertsEl = document.getElementById('enable-alerts');
+    const soundEl = document.getElementById('alert-sound');
+    const vibrateEl = document.getElementById('alert-vibrate');
+    const notifyEl = document.getElementById('alert-notify');
+    const testAlertBtn = document.getElementById('test-alert');
+    const toastContainer = document.getElementById('toast-container');
+
+    // ---- Layout: compute map height so controls never cover it ----
+    const appEl = document.getElementById('app');
+    const controlsEl = document.getElementById('controls');
+    const mapEl = document.getElementById('map');
+
+    function getDvh() {
+      if (window.visualViewport) return window.visualViewport.height;
+      return window.innerHeight;
+    }
+    function sizeMap() {
+      const viewportH = getDvh();
+      const styles = getComputedStyle(appEl);
+      const padTop = parseFloat(styles.paddingTop) || 0;
+      const padBottom = parseFloat(styles.paddingBottom) || 0;
+      const controlsH = controlsEl.getBoundingClientRect().height;
+      let available = viewportH - controlsH - padTop - padBottom;
+
+      const minH = viewportH * 0.5;
+      if (!Number.isFinite(available) || available < minH) available = minH;
+      mapEl.style.height = `${available}px`;
+      setTimeout(() => map.invalidateSize(), 50);
+    }
+    const ro = new ResizeObserver(sizeMap);
+    ro.observe(controlsEl);
+    window.addEventListener('resize', () => setTimeout(sizeMap, 50));
+    window.addEventListener('orientationchange', () => setTimeout(sizeMap, 150));
+    document.addEventListener('visibilitychange', () => setTimeout(sizeMap, 50));
+    sizeMap();
+
+    // --- Helpers ---
+    function setStatus(msg) { statusEl.textContent = 'Status: ' + msg; }
+
+    function destinationPoint(lat, lng, bearingDeg, distanceMeters) {
+      const R = 6371000;
+      const φ1 = lat * Math.PI/180;
+      const λ1 = lng * Math.PI/180;
+      const θ = bearingDeg * Math.PI/180;
+      const δ = distanceMeters / R;
+      const sinφ1 = Math.sin(φ1), cosφ1 = Math.cos(φ1);
+      const sinδ = Math.sin(δ), cosδ = Math.cos(δ);
+      const sinφ2 = sinφ1 * cosδ + cosφ1 * sinδ * Math.cos(θ);
+      const φ2 = Math.asin(sinφ2);
+      const y = Math.sin(θ) * sinδ * cosφ1;
+      const x = cosδ - sinφ1 * sinφ2;
+      const λ2 = λ1 + Math.atan2(y, x);
+      return { lat: φ2 * 180/Math.PI, lng: ((λ2 * 180/Math.PI + 540) % 360) - 180 };
+    }
+
+    // Haversine distance (meters)
+    function distanceMeters(lat1, lon1, lat2, lon2) {
+      const R = 6371000;
+      const toRad = d => d * Math.PI / 180;
+      const dLat = toRad(lat2 - lat1);
+      const dLon = toRad(lon2 - lon1);
+      const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLon/2)**2;
+      return 2 * R * Math.asin(Math.sqrt(a));
+    }
+
+    // Toasts
+    function showToast(kind, msg) {
+      const div = document.createElement('div');
+      div.className = `toast ${kind}`;
+      div.innerHTML = `<span>${msg}</span> <small>Dismiss</small>`;
+      div.addEventListener('click', () => div.remove());
+      toastContainer.appendChild(div);
+      setTimeout(() => div.remove(), 4500);
+    }
+
+    // Audio chime (Web Audio)
+    let audioCtx = null;
+    function playChime() {
+      try {
+        if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const o = audioCtx.createOscillator();
+        const g = audioCtx.createGain();
+        o.type = 'sine';
+        o.frequency.setValueAtTime(880, audioCtx.currentTime);
+        g.gain.setValueAtTime(0.001, audioCtx.currentTime);
+        g.gain.exponentialRampToValueAtTime(0.12, audioCtx.currentTime + 0.02);
+        g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.25);
+        o.connect(g).connect(audioCtx.destination);
+        o.start();
+        o.stop(audioCtx.currentTime + 0.28);
+      } catch (e) { /* ignore */ }
+    }
+
+    // System Notification
+    async function maybeNotify(title, body) {
+      if (!notifyEl.checked) return;
+      if (!('Notification' in window)) return;
+      if (Notification.permission === 'granted') {
+        new Notification(title, { body });
+      } else if (Notification.permission !== 'denied') {
+        const perm = await Notification.requestPermission();
+        if (perm === 'granted') new Notification(title, { body });
+      }
+    }
+
+    // Events log
+    const events = []; // {ts, type:'enter'|'exit', circleId, lat, lng, distance, accuracy}
+    function logEvent(evt) {
+      events.unshift(evt);
+      if (events.length > 20) events.pop();
+      renderEventLog();
+    }
+    function renderEventLog() {
+      if (!events.length) {
+        eventLogEl.innerHTML = '<p class="note">No alerts yet.</p>';
+        return;
+      }
+      eventLogEl.innerHTML = events.map(ev => {
+        const t = new Date(ev.ts).toLocaleTimeString();
+        const c = circles.find(x => x.id === ev.circleId);
+        const name = c ? `Circle #${c.id}` : `Circle`;
+        const dist = Math.round(ev.distance);
+        const acc = ev.accuracy != null ? ` ±${Math.round(ev.accuracy)}m` : '';
+        return `<div class="event-row"><strong>${ev.type.toUpperCase()}</strong> ${name} @ ${t} (d=${dist}m${acc})</div>`;
+      }).join('');
+    }
+
+    // --- Circles List UI ---
+    function renderCircleList() {
+      if (!circles.length) {
+        circleListEl.innerHTML = '<p class="note">No circles yet.</p>';
+        return;
+      }
+      const rows = circles.map(c => {
+        const lat = c.lat.toFixed(5);
+        const lng = c.lng.toFixed(5);
+        const rDisp = c.unit === 'ft' ? Math.round(c.displayRadius) : Math.round(c.displayRadius);
+        const unit = c.unit;
+        return `
+          <div class="circle-row" data-id="${c.id}">
+            <code>#${c.id} (${lat}, ${lng}) — ${rDisp} ${unit}</code>
+            <button class="mini btn-secondary" data-action="zoom" data-id="${c.id}">Zoom</button>
+            <button class="mini btn-ghost" data-action="delete" data-id="${c.id}">Delete</button>
+          </div>
+        `;
+      }).join('');
+      circleListEl.innerHTML = `
+        <div class="note" style="margin:0 0 6px 0"><strong>Circles</strong> (lat, lng, radius)</div>
+        ${rows}
+      `;
+    }
+
+    // Delegate clicks for Zoom/Delete
+    circleListEl.addEventListener('click', (e) => {
+      const btn = e.target.closest('button[data-action]');
+      if (!btn) return;
+      const id = Number(btn.getAttribute('data-id'));
+      const action = btn.getAttribute('data-action');
+      const item = circles.find(c => c.id === id);
+      if (!item) return;
+
+      if (action === 'zoom') {
+        map.setView([item.lat, item.lng], Math.max(map.getZoom(), 16), { animate: true });
+        if (item.layer && item.layer.openPopup) item.layer.openPopup();
+      } else if (action === 'delete') {
+        if (item.layer) geofenceGroup.removeLayer(item.layer);
+        circles = circles.filter(c => c.id !== id);
+        renderCircleList();
+        if (geofenceGroup.getLayers().length > 0) {
+          map.fitBounds(geofenceGroup.getBounds().pad(0.25));
+        }
+      }
+    });
+
+    function addCircleAt(lat, lng, radiusValue, unit) {
+      if (!Number.isFinite(lat) || !Number.isFinite(lng) || !Number.isFinite(radiusValue) || radiusValue <= 0) {
+        alert('Please provide valid latitude, longitude, and positive radius.');
+        return;
+      }
+      const radiusMeters = unit === 'ft' ? radiusValue * METERS_PER_FOOT : radiusValue;
+
+      const layer = L.circle([lat, lng], {
+        radius: radiusMeters,   // Leaflet expects meters
+        color: '#d63384',
+        fillColor: '#d63384',
+        fillOpacity: 0.1,
+        weight: 2
+      }).addTo(geofenceGroup);
+
+      const popupRadius = unit === 'ft'
+        ? `${Math.round(radiusValue)} ft (${Math.round(radiusMeters)} m)`
+        : `${Math.round(radiusValue)} m (${Math.round(radiusValue * FEET_PER_METER)} ft)`;
+
+      layer.bindPopup(`Circle #${nextId}<br>Lat: ${lat.toFixed(5)}<br>Lng: ${lng.toFixed(5)}<br>R: ${popupRadius}`);
+
+      circles.push({
+        id: nextId++,
+        lat, lng,
+        radiusMeters,
+        displayRadius: radiusValue, // original value they entered
+        unit,
+        layer,
+        inside: false // tracked per circle
+      });
+      renderCircleList();
+
+      if (geofenceGroup.getLayers().length === 1) {
+        map.fitBounds(geofenceGroup.getBounds().pad(0.25));
+      }
+    }
+
+    // Long-press add
+    let pressTimer = null;
+    map.on('mousedown touchstart', (e) => {
+      pressTimer = setTimeout(() => {
+        const r = parseFloat(radiusInput.value) || 100;
+        const unit = unitSelect.value; // 'm' or 'ft'
+        addCircleAt(e.latlng.lat, e.latlng.lng, r, unit);
+      }, 600);
+    });
+    map.on('mouseup touchend dragstart move', () => {
+      if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
+    });
+
+    // Avoid auto-recenter after user drag
+    map.on('movestart', () => { map._userHasMoved = true; });
+
+    // --- Geolocation + Alerts ---
+    function updateUserPosition(pos) {
+      const { latitude, longitude, accuracy, heading, speed } = pos.coords;
+      const latlng = [latitude, longitude];
+
+      if (!userMarker) {
+        userMarker = L.circleMarker(latlng, { radius: 7, color: '#0b5ed7', fillColor: '#0b5ed7', fillOpacity: 1 }).addTo(map);
+        accuracyCircle = L.circle(latlng, { radius: accuracy || 0, color: '#0b5ed7', fillColor: '#0b5ed7', fillOpacity: 0.1, weight: 1 }).addTo(map);
+      } else {
+        userMarker.setLatLng(latlng);
+        accuracyCircle.setLatLng(latlng).setRadius(accuracy || 0);
+      }
+
+      // Heading arrow (if available)
+      if (typeof heading === 'number' && !Number.isNaN(heading) && speed && speed > 0.2) {
+        const dest = destinationPoint(latitude, longitude, heading, 25);
+        const latlng2 = [dest.lat, dest.lng];
+        if (!headingArrow) {
+          headingArrow = L.polyline([latlng, latlng2], { color: '#0b5ed7', weight: 2 }).addTo(map);
+        } else {
+          headingArrow.setLatLngs([latlng, latlng2]);
+        }
+      } else if (headingArrow) {
+        headingArrow.remove();
+        headingArrow = null;
+      }
+
+      useMyPosBtn.disabled = true === false ? false : false; // no-op to keep linter happy
+      useMyPosBtn.disabled = false;
+      recenterBtn.disabled = false;
+
+      // Geofence checks
+      if (enableAlertsEl.checked && circles.length) {
+        checkGeofences(latitude, longitude, accuracy ?? 0);
+      }
+    }
+
+    // Hysteresis-based geofence detection
+    function checkGeofences(userLat, userLng, accuracyM) {
+      for (const c of circles) {
+        const d = distanceMeters(userLat, userLng, c.lat, c.lng); // meters
+        // Dynamic thresholds: include some buffer using reported GPS accuracy
+        const enterThreshold = c.radiusMeters + Math.max(10, accuracyM * 0.5);
+        const exitThreshold  = c.radiusMeters + Math.max(15, accuracyM); // slightly larger to prevent flapping
+
+        if (!c.inside && d <= enterThreshold) {
+          c.inside = true;
+          onGeofenceEvent('enter', c, { userLat, userLng, d, accuracyM });
+        } else if (c.inside && d > exitThreshold) {
+          c.inside = false;
