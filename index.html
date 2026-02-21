@@ -16,7 +16,7 @@
   />
 
   <style>
-    /* 1) CSS Reset + Mobile-friendly base */
+    /* 1) Reset + base */
     *, *::before, *::after { box-sizing: border-box; }
     html, body { height: 100%; }
     body {
@@ -29,14 +29,13 @@
       -webkit-tap-highlight-color: transparent;
     }
 
-    /* Respect iOS notch / Android cutouts */
+    /* Safe areas */
     :root {
       --safe-top: env(safe-area-inset-top);
       --safe-right: env(safe-area-inset-right);
       --safe-bottom: env(safe-area-inset-bottom);
       --safe-left: env(safe-area-inset-left);
 
-      /* Brand + UI colors */
       --brand: #0b5ed7;
       --accent: #d63384;
 
@@ -47,16 +46,11 @@
       --text-muted: #6b7280;
 
       --radius: 12px;
-
-      /* Fluid sizes for small → large screens */
-      --space-1: clamp(6px, 1.2vw, 8px);
       --space-2: clamp(10px, 1.8vw, 12px);
       --space-3: clamp(12px, 2.4vw, 16px);
-      --space-4: clamp(16px, 3vw, 20px);
       --control-height: 44px;
     }
 
-    /* Dark mode */
     @media (prefers-color-scheme: dark) {
       :root {
         --bg: #0b0f19;
@@ -68,61 +62,46 @@
       body { color: var(--text); background: var(--bg); }
     }
 
-    /* 2) Layout */
+    /* 2) App layout: column, map height computed in JS */
     .app {
       min-height: 100dvh;
-      display: grid;
-      grid-template-rows: auto 1fr auto;
-      gap: 0;
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-3);
+      padding: max(var(--space-3), var(--safe-top)) max(var(--space-3), var(--safe-right)) max(var(--safe-3, 12px), var(--safe-bottom)) max(var(--space-3), var(--safe-left));
+      padding-bottom: max(var(--space-3), var(--safe-bottom));
       background: var(--bg);
-      padding-left: max(var(--space-2), var(--safe-left));
-      padding-right: max(var(--space-2), var(--safe-right));
-      padding-top: max(var(--space-2), var(--safe-top));
-      padding-bottom: max(0px, var(--safe-bottom));
     }
 
-    /* Map: ensure at least half the device height, aim for more on phones */
+    /* The map gets its height dynamically. We keep styling only. */
     #map {
-      height: 65dvh;        /* primary target on phones */
-      min-height: 50dvh;    /* never below half the screen */
       border-radius: var(--radius);
       overflow: hidden;
       outline: 1px solid var(--border);
       background: #dcdcdc;
-    }
-    @media (min-height: 700px) {
-      #map { height: 68dvh; }
-    }
-    @media (orientation: landscape) and (max-height: 500px) {
-      #map { height: 72dvh; }
+      /* fallback minimum if JS hasn’t run yet */
+      min-height: 50dvh;
     }
     @supports not (height: 1dvh) {
-      #map {
-        height: 65vh;
-        min-height: 50vh;
-      }
+      #map { min-height: 50vh; }
     }
 
-    /* 3) Controls container (sticky) */
+    /* Controls are not sticky anymore to avoid covering the map.
+       If you want stickiness later, we can add auto top-padding to the map. */
     .controls {
-      position: sticky;
-      bottom: 0;
-      z-index: 500;
       display: grid;
       gap: var(--space-3);
-      padding: var(--space-3);
-      margin-top: var(--space-3);
       background: color-mix(in oklab, var(--bg) 92%, transparent);
-      backdrop-filter: saturate(1.1) blur(6px);
+      backdrop-filter: saturate(1.05) blur(4px);
       border-radius: var(--radius);
       border: 1px solid var(--border);
+      padding: var(--space-3);
       grid-template-columns: 1fr;
     }
     @media (min-width: 720px) {
       .controls { grid-template-columns: 1fr 1fr; }
     }
 
-    /* Cards/fieldsets */
     fieldset {
       border: 1px solid var(--border);
       border-radius: var(--radius);
@@ -136,7 +115,6 @@
       color: var(--text);
     }
 
-    /* Inputs + Buttons */
     label {
       display: block;
       font-size: 0.92rem;
@@ -223,10 +201,10 @@
   </style>
 </head>
 <body>
-  <div class="app">
+  <div class="app" id="app">
     <div id="map"></div>
 
-    <div class="controls">
+    <div class="controls" id="controls">
       <fieldset>
         <legend>Live Location</legend>
         <div class="row">
@@ -270,10 +248,7 @@
     const map = L.map('map');
     L.tileLayer(
       'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-      {
-        maxZoom: 19,
-        attribution: '&copy; OpenStreetMap contributors'
-      }
+      { maxZoom: 19, attribution: '&copy; OpenStreetMap contributors' }
     ).addTo(map);
 
     // Default view (Markham area as a fallback)
@@ -281,9 +256,9 @@
 
     // --- Live location layers ---
     let watchId = null;
-    let userMarker = null;         // Dot showing current position
-    let accuracyCircle = null;     // Circle showing reported accuracy
-    let headingArrow = null;       // Small polyline to show heading
+    let userMarker = null;
+    let accuracyCircle = null;
+    let headingArrow = null;
 
     // --- Geofence circles ---
     const geofenceGroup = L.featureGroup().addTo(map);
@@ -297,33 +272,82 @@
     const latInput = document.getElementById('circle-lat');
     const lngInput = document.getElementById('circle-lng');
     const radiusInput = document.getElementById('circle-radius');
-    const addCircleBtn = document.getElementById('add-circle');
-    const clearCirclesBtn = document.getElementById('clear-circles');
 
-    // Helper: set status text
+    // ---- Layout: compute map height so controls never cover it ----
+    const appEl = document.getElementById('app');
+    const controlsEl = document.getElementById('controls');
+    const mapEl = document.getElementById('map');
+
+    function getDvh() {
+      // Prefer visualViewport height for mobile browsers
+      if (window.visualViewport) return window.visualViewport.height;
+      // fallback to window innerHeight
+      return window.innerHeight;
+    }
+    function safeInset(value, fallback = 0) {
+      // Try to read CSS env safe-area if supported
+      try {
+        const div = document.createElement('div');
+        div.style.cssText = 'position:fixed;top:env(safe-area-inset-top,0);left:0;visibility:hidden;';
+        document.body.appendChild(div);
+        const used = parseFloat(getComputedStyle(div).top) || fallback;
+        div.remove();
+        return used;
+      } catch { return fallback; }
+    }
+
+    function sizeMap() {
+      const viewportH = getDvh();
+      const styles = getComputedStyle(appEl);
+      const padTop = parseFloat(styles.paddingTop) || 0;
+      const padBottom = parseFloat(styles.paddingBottom) || 0;
+
+      const controlsH = controlsEl.getBoundingClientRect().height;
+      const safeTop = safeInset('--safe-top', 0);
+      const safeBottom = safeInset('--safe-bottom', 0);
+
+      // Calculate available space for the map
+      let available = viewportH - controlsH - padTop - padBottom - safeTop - safeBottom;
+
+      // Enforce minimum of 50% viewport
+      const minH = viewportH * 0.5;
+      if (isNaN(available) || available < minH) available = minH;
+
+      mapEl.style.height = `${available}px`;
+
+      // Tell Leaflet to recompute
+      setTimeout(() => map.invalidateSize(), 50);
+    }
+
+    // Recalculate on layout-affecting events
+    const ro = new ResizeObserver(sizeMap);
+    ro.observe(controlsEl);
+    window.addEventListener('resize', () => setTimeout(sizeMap, 50));
+    window.addEventListener('orientationchange', () => setTimeout(sizeMap, 150));
+    document.addEventListener('visibilitychange', () => setTimeout(sizeMap, 50));
+
+    // Initial sizing
+    sizeMap();
+
+    // --- Helpers ---
     function setStatus(msg) { statusEl.textContent = 'Status: ' + msg; }
 
-    // Compute destination point given start lat/lng, bearing (deg), distance (m).
     function destinationPoint(lat, lng, bearingDeg, distanceMeters) {
-      const R = 6371000; // earth radius (m)
+      const R = 6371000;
       const φ1 = lat * Math.PI/180;
       const λ1 = lng * Math.PI/180;
       const θ = bearingDeg * Math.PI/180;
       const δ = distanceMeters / R;
-
       const sinφ1 = Math.sin(φ1), cosφ1 = Math.cos(φ1);
       const sinδ = Math.sin(δ), cosδ = Math.cos(δ);
-
       const sinφ2 = sinφ1 * cosδ + cosφ1 * sinδ * Math.cos(θ);
       const φ2 = Math.asin(sinφ2);
       const y = Math.sin(θ) * sinδ * cosφ1;
       const x = cosδ - sinφ1 * sinφ2;
       const λ2 = λ1 + Math.atan2(y, x);
-
       return { lat: φ2 * 180/Math.PI, lng: ((λ2 * 180/Math.PI + 540) % 360) - 180 };
     }
 
-    // Helper: create or update user layers
     function updateUserPosition(pos) {
       const { latitude, longitude, accuracy, heading, speed } = pos.coords;
       const latlng = [latitude, longitude];
@@ -348,9 +372,8 @@
         accuracyCircle.setLatLng(latlng).setRadius(accuracy || 0);
       }
 
-      // Heading arrow (if heading is a number 0..360)
       if (typeof heading === 'number' && !Number.isNaN(heading) && speed && speed > 0.2) {
-        const length = 25; // meters
+        const length = 25;
         const dest = destinationPoint(latitude, longitude, heading, length);
         const latlng2 = [dest.lat, dest.lng];
 
@@ -368,7 +391,7 @@
       recenterBtn.disabled = false;
     }
 
-    // --- Geolocation watch ---
+    // --- Geolocation ---
     function startTracking() {
       if (!('geolocation' in navigator)) {
         setStatus('Geolocation not supported');
@@ -381,7 +404,6 @@
         (pos) => {
           updateUserPosition(pos);
           const latlng = [pos.coords.latitude, pos.coords.longitude];
-          // First fix: fit map to a nice zoom if still default
           if (!map._userHasMoved) {
             map.setView(latlng, Math.max(map.getZoom(), 16), { animate: true });
           }
@@ -391,11 +413,7 @@
           setStatus('Error: ' + err.message);
           console.error(err);
         },
-        {
-          enableHighAccuracy: true, // try GPS
-          maximumAge: 5000,         // accept up to 5s cached
-          timeout: 20000            // 20s timeout
-        }
+        { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 }
       );
 
       startBtn.disabled = true;
@@ -410,10 +428,9 @@
       }
       startBtn.disabled = false;
       stopBtn.disabled = true;
-      // Keep layers on map so you can still recenter/use coords
     }
 
-    // --- Circle handling ---
+    // --- Circles ---
     function addCircleAt(lat, lng, radiusMeters) {
       if (!Number.isFinite(lat) || !Number.isFinite(lng) || !Number.isFinite(radiusMeters) || radiusMeters <= 0) {
         alert('Please provide valid latitude, longitude, and positive radius in meters.');
@@ -427,28 +444,26 @@
         weight: 2
       }).addTo(geofenceGroup);
 
-      // Optional label
       circle.bindPopup(`Circle<br>Lat: ${lat.toFixed(5)}<br>Lng: ${lng.toFixed(5)}<br>R: ${Math.round(radiusMeters)} m`);
 
-      // Fit bounds if this is the first circle
       if (geofenceGroup.getLayers().length === 1) {
         map.fitBounds(geofenceGroup.getBounds().pad(0.25));
       }
     }
 
-    // Long-press to add a circle where you press
+    // Long-press add
     let pressTimer = null;
     map.on('mousedown touchstart', (e) => {
       pressTimer = setTimeout(() => {
         const r = parseFloat(radiusInput.value) || 100;
         addCircleAt(e.latlng.lat, e.latlng.lng, r);
-      }, 600); // long-press threshold (ms)
+      }, 600);
     });
     map.on('mouseup touchend dragstart move', () => {
       if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
     });
 
-    // Track map movement to avoid re-centering after user drags
+    // Avoid auto-recenter after user drag
     map.on('movestart', () => { map._userHasMoved = true; });
 
     // Wire up controls
@@ -476,16 +491,9 @@
       lngInput.value = lng.toFixed(6);
     });
 
-    // Start immediately for convenience (you can remove this if you prefer manual)
+    // Start immediately
     startTracking();
-
-    // Keep map sized correctly as mobile UI changes
-    ['orientationchange', 'resize', 'visibilitychange'].forEach(evt => {
-      window.addEventListener(evt, () => setTimeout(() => map.invalidateSize(), 200));
-    });
-
-    // Inputs/refs used above
-    const statusEl2 = statusEl; // (kept to avoid accidental removal)
   </script>
 </body>
 </html>
+``
