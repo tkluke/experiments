@@ -70,7 +70,7 @@
 
     /* 2) Layout */
     .app {
-      min-height: 100dvh; /* modern viewport unit */
+      min-height: 100dvh;
       display: grid;
       grid-template-rows: auto 1fr auto;
       gap: 0;
@@ -81,28 +81,33 @@
       padding-bottom: max(0px, var(--safe-bottom));
     }
 
-    /* Map uses most of the screen on mobile */
+    /* Map: ensure at least half the device height, aim for more on phones */
     #map {
-      height: 58vh; /* default phone layout */
+      height: 65dvh;        /* primary target on phones */
+      min-height: 50dvh;    /* never below half the screen */
       border-radius: var(--radius);
       overflow: hidden;
       outline: 1px solid var(--border);
       background: #dcdcdc;
     }
-
-    /* On taller devices or landscape, give map more room */
     @media (min-height: 700px) {
-      #map { height: 62vh; }
+      #map { height: 68dvh; }
     }
     @media (orientation: landscape) and (max-height: 500px) {
-      #map { height: 70vh; }
+      #map { height: 72dvh; }
+    }
+    @supports not (height: 1dvh) {
+      #map {
+        height: 65vh;
+        min-height: 50vh;
+      }
     }
 
     /* 3) Controls container (sticky) */
     .controls {
       position: sticky;
       bottom: 0;
-      z-index: 500; /* above map markers popups */
+      z-index: 500;
       display: grid;
       gap: var(--space-3);
       padding: var(--space-3);
@@ -111,6 +116,10 @@
       backdrop-filter: saturate(1.1) blur(6px);
       border-radius: var(--radius);
       border: 1px solid var(--border);
+      grid-template-columns: 1fr;
+    }
+    @media (min-width: 720px) {
+      .controls { grid-template-columns: 1fr 1fr; }
     }
 
     /* Cards/fieldsets */
@@ -127,7 +136,7 @@
       color: var(--text);
     }
 
-    /* 4) Inputs + Buttons */
+    /* Inputs + Buttons */
     label {
       display: block;
       font-size: 0.92rem;
@@ -178,23 +187,13 @@
       border: 1px dashed var(--border);
     }
 
-    /* Grid rows for buttons */
     .row {
       display: grid;
       grid-template-columns: 1fr 1fr 1fr;
       gap: var(--space-2);
     }
-    /* On narrow screens, stack buttons in 2 columns to keep them tappable */
     @media (max-width: 440px) {
       .row { grid-template-columns: 1fr 1fr; }
-    }
-
-    /* Control groups layout */
-    .controls {
-      grid-template-columns: 1fr;
-    }
-    @media (min-width: 720px) {
-      .controls { grid-template-columns: 1fr 1fr; }
     }
 
     .note {
@@ -203,25 +202,7 @@
       margin: 6px 0 0 0;
     }
 
-    /* 5) Collapsible (not used by default, kept for future) */
-    details.collapsible {
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      background: var(--surface);
-      padding: var(--space-2);
-    }
-    details.collapsible > summary {
-      cursor: pointer;
-      list-style: none;
-      font-weight: 650;
-      padding: var(--space-2);
-      border-radius: calc(var(--radius) - 4px);
-      outline: none;
-    }
-    details.collapsible > summary::-webkit-details-marker { display: none; }
-    details.collapsible[open] { padding-bottom: var(--space-3); }
-
-    /* 6) Leaflet theme fits dark mode */
+    /* Leaflet theme in dark mode */
     .leaflet-container a { color: var(--brand); }
     .leaflet-popup-content-wrapper, .leaflet-popup-tip {
       background: var(--surface);
@@ -236,7 +217,6 @@
       border: 1px solid var(--border);
     }
 
-    /* 7) iOS Safari viewport quirks: ensure full height usage */
     @supports (-webkit-touch-callout: none) {
       .app { min-height: -webkit-fill-available; }
     }
@@ -499,10 +479,13 @@
     // Start immediately for convenience (you can remove this if you prefer manual)
     startTracking();
 
-    // Handle orientation changes (iOS Safari sizing)
-    window.addEventListener('orientationchange', () => {
-      setTimeout(() => map.invalidateSize(), 200);
+    // Keep map sized correctly as mobile UI changes
+    ['orientationchange', 'resize', 'visibilitychange'].forEach(evt => {
+      window.addEventListener(evt, () => setTimeout(() => map.invalidateSize(), 200));
     });
+
+    // Inputs/refs used above
+    const statusEl2 = statusEl; // (kept to avoid accidental removal)
   </script>
 </body>
 </html>
