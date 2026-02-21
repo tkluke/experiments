@@ -134,3 +134,450 @@
       appearance: none;
     }
     input[type="number"]::-webkit-outer-spin-button,
+    input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+    input[type="number"]:focus, select:focus {
+      border-color: color-mix(in oklab, var(--brand) 70%, var(--border));
+      box-shadow: 0 0 0 3px color-mix(in oklab, var(--brand) 20%, transparent);
+    }
+
+    button {
+      height: var(--control-height);
+      border: none;
+      border-radius: calc(var(--radius) - 4px);
+      background: var(--brand);
+      color: #fff;
+      font-weight: 600;
+      letter-spacing: 0.2px;
+      padding: 0 var(--space-3);
+      touch-action: manipulation;
+    }
+    button:disabled {
+      opacity: 0.55;
+      filter: grayscale(0.1);
+    }
+    .btn-secondary {
+      background: color-mix(in oklab, var(--brand) 20%, var(--surface));
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+    .btn-ghost {
+      background: transparent;
+      color: var(--text);
+      border: 1px dashed var(--border);
+    }
+
+    .row {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: var(--space-2);
+    }
+    @media (max-width: 440px) {
+      .row { grid-template-columns: 1fr 1fr; }
+    }
+
+    .note {
+      font-size: 0.86rem;
+      color: var(--text-muted);
+      margin: 6px 0 0 0;
+    }
+
+    /* Circles list styles */
+    #circle-list {
+      margin-top: 10px;
+      display: grid;
+      gap: 8px;
+    }
+    .circle-row {
+      display: grid;
+      grid-template-columns: 1fr auto auto;
+      gap: 8px;
+      align-items: center;
+      font-size: 0.95rem;
+    }
+    .circle-row code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      background: color-mix(in oklab, var(--surface) 90%, transparent);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 6px 8px;
+      color: var(--text);
+    }
+    .circle-row .mini {
+      height: 34px;
+      padding: 0 10px;
+      font-size: 0.85rem;
+      border-radius: 8px;
+    }
+
+    /* Leaflet theme in dark mode */
+    .leaflet-container a { color: var(--brand); }
+    .leaflet-popup-content-wrapper, .leaflet-popup-tip {
+      background: var(--surface);
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+    .leaflet-control-attribution {
+      background: color-mix(in oklab, var(--bg) 80%, transparent) !important;
+      color: var(--text-muted) !important;
+      padding: 2px 6px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+    }
+
+    @supports (-webkit-touch-callout: none) {
+      .app { min-height: -webkit-fill-available; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app" id="app">
+    <div id="map"></div>
+
+    <div class="controls" id="controls">
+      <fieldset>
+        <legend>Live Location</legend>
+        <div class="row">
+          <button id="start">Start Tracking</button>
+          <button id="stop" class="btn-secondary" disabled>Stop</button>
+          <button id="recenter" class="btn-ghost" disabled>Recenter</button>
+        </div>
+        <p class="note" id="status">Status: idle</p>
+      </fieldset>
+
+      <fieldset>
+        <legend>Add Circle</legend>
+        <label>Center Latitude
+          <input type="number" step="any" id="circle-lat" placeholder="e.g., 43.8561" />
+        </label>
+        <label>Center Longitude
+          <input type="number" step="any" id="circle-lng" placeholder="-79.3370" />
+        </label>
+        <label>Radius</label>
+        <div class="inline">
+          <input type="number" step="1" id="circle-radius" placeholder="100" value="100" />
+          <select id="circle-unit" aria-label="Radius unit">
+            <option value="m" selected>m</option>
+            <option value="ft">ft</option>
+          </select>
+        </div>
+        <div class="row" style="margin-top:8px;">
+          <button id="use-my-pos" class="btn-secondary" disabled>Use My Position</button>
+          <button id="add-circle">Add Circle</button>
+          <button id="clear-circles" class="btn-ghost">Clear Circles</button>
+        </div>
+        <p class="note">Tip: Long‑press on the map to add a circle at that spot.</p>
+
+        <!-- Circles list renders here -->
+        <div id="circle-list"></div>
+      </fieldset>
+    </div>
+  </div>
+
+  <!-- Leaflet JS -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+
+  <script>
+    // --- Constants for unit conversion ---
+    const METERS_PER_FOOT = 0.3048;
+    const FEET_PER_METER = 1 / METERS_PER_FOOT; // 3.280839895...
+
+    // --- Map setup ---
+    const map = L.map('map');
+    L.tileLayer(
+      'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+      { maxZoom: 19, attribution: '&copy; OpenStreetMap contributors' }
+    ).addTo(map);
+
+    // Default view (Markham area as a fallback)
+    map.setView([43.8561, -79.3370], 13);
+
+    // --- Live location layers ---
+    let watchId = null;
+    let userMarker = null;
+    let accuracyCircle = null;
+    let headingArrow = null;
+
+    // --- Geofence circles ---
+    const geofenceGroup = L.featureGroup().addTo(map);
+    const circleListEl = document.getElementById('circle-list');
+
+    // Keep our circles so we can list/delete/zoom
+    // Each: { id, lat, lng, radiusMeters, displayRadius, unit, layer }
+    let circles = [];
+    let nextId = 1;
+
+    // Controls
+    const statusEl = document.getElementById('status');
+    const startBtn = document.getElementById('start');
+    const stopBtn = document.getElementById('stop');
+    const recenterBtn = document.getElementById('recenter');
+    const useMyPosBtn = document.getElementById('use-my-pos');
+    const latInput = document.getElementById('circle-lat');
+    const lngInput = document.getElementById('circle-lng');
+    const radiusInput = document.getElementById('circle-radius');
+    const unitSelect = document.getElementById('circle-unit');
+
+    // ---- Layout: compute map height so controls never cover it ----
+    const appEl = document.getElementById('app');
+    const controlsEl = document.getElementById('controls');
+    const mapEl = document.getElementById('map');
+
+    function getDvh() {
+      if (window.visualViewport) return window.visualViewport.height;
+      return window.innerHeight;
+    }
+    function sizeMap() {
+      const viewportH = getDvh();
+      const styles = getComputedStyle(appEl);
+      const padTop = parseFloat(styles.paddingTop) || 0;
+      const padBottom = parseFloat(styles.paddingBottom) || 0;
+      const controlsH = controlsEl.getBoundingClientRect().height;
+      let available = viewportH - controlsH - padTop - padBottom;
+
+      const minH = viewportH * 0.5;
+      if (!Number.isFinite(available) || available < minH) available = minH;
+      mapEl.style.height = `${available}px`;
+      setTimeout(() => map.invalidateSize(), 50);
+    }
+    const ro = new ResizeObserver(sizeMap);
+    ro.observe(controlsEl);
+    window.addEventListener('resize', () => setTimeout(sizeMap, 50));
+    window.addEventListener('orientationchange', () => setTimeout(sizeMap, 150));
+    document.addEventListener('visibilitychange', () => setTimeout(sizeMap, 50));
+    sizeMap();
+
+    // --- Helpers ---
+    function setStatus(msg) { statusEl.textContent = 'Status: ' + msg; }
+
+    function destinationPoint(lat, lng, bearingDeg, distanceMeters) {
+      const R = 6371000;
+      const φ1 = lat * Math.PI/180;
+      const λ1 = lng * Math.PI/180;
+      const θ = bearingDeg * Math.PI/180;
+      const δ = distanceMeters / R;
+      const sinφ1 = Math.sin(φ1), cosφ1 = Math.cos(φ1);
+      const sinδ = Math.sin(δ), cosδ = Math.cos(δ);
+      const sinφ2 = sinφ1 * cosδ + cosφ1 * sinδ * Math.cos(θ);
+      const φ2 = Math.asin(sinφ2);
+      const y = Math.sin(θ) * sinδ * cosφ1;
+      const x = cosδ - sinφ1 * sinφ2;
+      const λ2 = λ1 + Math.atan2(y, x);
+      return { lat: φ2 * 180/Math.PI, lng: ((λ2 * 180/Math.PI + 540) % 360) - 180 };
+    }
+
+    // --- Circles List UI ---
+    function renderCircleList() {
+      if (!circles.length) {
+        circleListEl.innerHTML = '<p class="note">No circles yet.</p>';
+        return;
+      }
+
+      const rows = circles.map(c => {
+        const lat = c.lat.toFixed(5);
+        const lng = c.lng.toFixed(5);
+        const r = c.unit === 'ft'
+          ? Math.round(c.displayRadius)
+          : Math.round(c.displayRadius);
+        const unit = c.unit;
+        return `
+          <div class="circle-row" data-id="${c.id}">
+            <code>(${lat}, ${lng}) — ${r} ${unit}</code>
+            <button class="mini btn-secondary" data-action="zoom" data-id="${c.id}">Zoom</button>
+            <button class="mini btn-ghost" data-action="delete" data-id="${c.id}">Delete</button>
+          </div>
+        `;
+      }).join('');
+      circleListEl.innerHTML = `
+        <div class="note" style="margin:0 0 6px 0"><strong>Circles</strong> (lat, lng, radius)</div>
+        ${rows}
+      `;
+    }
+
+    // Delegate clicks for Zoom/Delete
+    circleListEl.addEventListener('click', (e) => {
+      const btn = e.target.closest('button[data-action]');
+      if (!btn) return;
+      const id = Number(btn.getAttribute('data-id'));
+      const action = btn.getAttribute('data-action');
+      const item = circles.find(c => c.id === id);
+      if (!item) return;
+
+      if (action === 'zoom') {
+        map.setView([item.lat, item.lng], Math.max(map.getZoom(), 16), { animate: true });
+        if (item.layer && item.layer.openPopup) item.layer.openPopup();
+      } else if (action === 'delete') {
+        if (item.layer) geofenceGroup.removeLayer(item.layer);
+        circles = circles.filter(c => c.id !== id);
+        renderCircleList();
+        if (geofenceGroup.getLayers().length > 0) {
+          map.fitBounds(geofenceGroup.getBounds().pad(0.25));
+        }
+      }
+    });
+
+    function addCircleAt(lat, lng, radiusValue, unit) {
+      if (!Number.isFinite(lat) || !Number.isFinite(lng) || !Number.isFinite(radiusValue) || radiusValue <= 0) {
+        alert('Please provide valid latitude, longitude, and positive radius.');
+        return;
+      }
+      const radiusMeters = unit === 'ft' ? radiusValue * METERS_PER_FOOT : radiusValue;
+
+      const layer = L.circle([lat, lng], {
+        radius: radiusMeters,   // Leaflet expects meters
+        color: '#d63384',
+        fillColor: '#d63384',
+        fillOpacity: 0.1,
+        weight: 2
+      }).addTo(geofenceGroup);
+
+      const popupRadius = unit === 'ft'
+        ? `${Math.round(radiusValue)} ft (${Math.round(radiusMeters)} m)`
+        : `${Math.round(radiusValue)} m (${Math.round(radiusValue * FEET_PER_METER)} ft)`;
+
+      layer.bindPopup(`Circle<br>Lat: ${lat.toFixed(5)}<br>Lng: ${lng.toFixed(5)}<br>R: ${popupRadius}`);
+
+      circles.push({
+        id: nextId++,
+        lat, lng,
+        radiusMeters,
+        displayRadius: radiusValue, // keep original number they entered
+        unit,
+        layer
+      });
+      renderCircleList();
+
+      if (geofenceGroup.getLayers().length === 1) {
+        map.fitBounds(geofenceGroup.getBounds().pad(0.25));
+      }
+    }
+
+    // Long-press add
+    let pressTimer = null;
+    map.on('mousedown touchstart', (e) => {
+      pressTimer = setTimeout(() => {
+        const r = parseFloat(radiusInput.value) || 100;
+        const unit = unitSelect.value; // 'm' or 'ft'
+        addCircleAt(e.latlng.lat, e.latlng.lng, r, unit);
+      }, 600);
+    });
+    map.on('mouseup touchend dragstart move', () => {
+      if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
+    });
+
+    // Avoid auto-recenter after user drag
+    map.on('movestart', () => { map._userHasMoved = true; });
+
+    // --- Geolocation ---
+    function updateUserPosition(pos) {
+      const { latitude, longitude, accuracy, heading, speed } = pos.coords;
+      const latlng = [latitude, longitude];
+
+      if (!userMarker) {
+        userMarker = L.circleMarker(latlng, {
+          radius: 7,
+          color: '#0b5ed7',
+          fillColor: '#0b5ed7',
+          fillOpacity: 1
+        }).addTo(map);
+
+        accuracyCircle = L.circle(latlng, {
+          radius: accuracy || 0,
+          color: '#0b5ed7',
+          fillColor: '#0b5ed7',
+          fillOpacity: 0.1,
+          weight: 1
+        }).addTo(map);
+      } else {
+        userMarker.setLatLng(latlng);
+        accuracyCircle.setLatLng(latlng).setRadius(accuracy || 0);
+      }
+
+      // Heading arrow (if available)
+      if (typeof heading === 'number' && !Number.isNaN(heading) && speed && speed > 0.2) {
+        const length = 25;
+        const dest = destinationPoint(latitude, longitude, heading, length);
+        const latlng2 = [dest.lat, dest.lng];
+
+        if (!headingArrow) {
+          headingArrow = L.polyline([latlng, latlng2], { color: '#0b5ed7', weight: 2 }).addTo(map);
+        } else {
+          headingArrow.setLatLngs([latlng, latlng2]);
+        }
+      } else if (headingArrow) {
+        headingArrow.remove();
+        headingArrow = null;
+      }
+
+      useMyPosBtn.disabled = false;
+      recenterBtn.disabled = false;
+    }
+
+    function startTracking() {
+      if (!('geolocation' in navigator)) {
+        setStatus('Geolocation not supported');
+        return;
+      }
+      if (watchId !== null) return;
+
+      setStatus('Requesting location...');
+      watchId = navigator.geolocation.watchPosition(
+        (pos) => {
+          updateUserPosition(pos);
+          const latlng = [pos.coords.latitude, pos.coords.longitude];
+          if (!map._userHasMoved) {
+            map.setView(latlng, Math.max(map.getZoom(), 16), { animate: true });
+          }
+          setStatus(`Fix: ${latlng[0].toFixed(5)}, ${latlng[1].toFixed(5)} ±${Math.round(pos.coords.accuracy)}m`);
+        },
+        (err) => {
+          setStatus('Error: ' + err.message);
+          console.error(err);
+        },
+        { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 }
+      );
+
+      startBtn.disabled = true;
+      stopBtn.disabled = false;
+    }
+
+    function stopTracking() {
+      if (watchId !== null) {
+        navigator.geolocation.clearWatch(watchId);
+        watchId = null;
+        setStatus('Tracking stopped');
+      }
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
+    }
+
+    // Wire up controls
+    document.getElementById('start').addEventListener('click', startTracking);
+    document.getElementById('stop').addEventListener('click', stopTracking);
+    document.getElementById('recenter').addEventListener('click', () => {
+      if (userMarker) { map.setView(userMarker.getLatLng(), Math.max(map.getZoom(), 16), { animate: true }); }
+    });
+    document.getElementById('add-circle').addEventListener('click', () => {
+      const lat = parseFloat(latInput.value);
+      const lng = parseFloat(lngInput.value);
+      const radiusValue = parseFloat(radiusInput.value);
+      const unit = unitSelect.value; // 'm' or 'ft'
+      addCircleAt(lat, lng, radiusValue, unit);
+    });
+    document.getElementById('clear-circles').addEventListener('click', () => {
+      geofenceGroup.clearLayers();
+      circles = [];
+      renderCircleList();
+    });
+    document.getElementById('use-my-pos').addEventListener('click', () => {
+      if (!userMarker) return;
+      const { lat, lng } = userMarker.getLatLng();
+      latInput.value = lat.toFixed(6);
+      lngInput.value = lng.toFixed(6);
+    });
+
+    // Start immediately + render empty list initially
+    startTracking();
+    renderCircleList();
+  </script>
+</body>
+</html>
