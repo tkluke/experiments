@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>My GPS Map with Geofences</title>
+
+  <!-- Leaflet CSS -->
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin=""
+  />
+  <style>
+    html, body { height: 100%; margin: 0; }
+    #map { height: 70vh; }
+    .controls {
+      padding: 10px;
+      display: grid;
+      gap: 8px;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      align-items: end;
+    }
+    fieldset { border: 1px solid #ddd; border-radius: 8px; padding: 10px; }
+    legend { font-weight: 600; }
+    label { display: block; font-size: 0.9rem; margin-bottom: 4px; }
+    input, button { width: 100%; padding: 8px; }
+    .row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+    .note { font-size: 0.85rem; color: #666; }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+
+  <div class="controls">
+    <fieldset>
+      <legend>Live Location</legend>
+      <div class="row">
+        <button id="start">Start Tracking</button>
+        <button id="stop" disabled>Stop</button>
+        <button id="recenter" disabled>Recenter</button>
+      </div>
+      <p class="note" id="status">Status: idle</p>
+    </fieldset>
+
+    <fieldset>
+      <legend>Add Circle</legend>
+      <label>Center Latitude
+        <input type="number" step="any" id="circle-lat" placeholder="e.g., 43.8561" />
+      </label>
+      <label>Center Longitude
+        <input type="number" step="any" id="circle-lng" placeholder="-79.3370" />
+      </label>
+      <label>Radius (meters)
+        <input type="number" step="1" id="circle-radius" placeholder="100" value="100" />
+      </label>
+      <div class="row">
+        <button id="use-my-pos" disabled>Use My Position</button>
+        <button id="add-circle">Add Circle</button>
+        <button id="clear-circles">Clear Circles</button>
+      </div>
+      <p class="note">Tip: Long-press on the map to add a circle at that spot.</p>
+    </fieldset>
+  </div>
+
+  <!-- Leaflet JS -->
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+    crossorigin=""
+  ></script>
+
+  <script>
+    // --- Map setup ---
+    const map = L.map('map');
+    const tiles = L.tileLayer(
+      'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+      {
+        maxZoom: 19,
+        attribution: '&copy; OpenStreetMap contributors'
+      }
+    ).addTo(map);
+
+    // Default view (Markham area as a fallback)
+    map.setView([43.8561, -79.3370], 13);
+
+    // --- Live location layers ---
+    let watchId = null;
+    let userMarker = null;         // Dot showing current position
+    let accuracyCircle = null;     // Circle showing reported accuracy
+    let headingArrow = null;       // Small polyline to show heading
+
+    // --- Geofence circles ---
+    const geofenceGroup = L.featureGroup().addTo(map);
+
+    // Controls
+    const statusEl = document.getElementById('status');
+    const startBtn = document.getElementById('start');
+    const stopBtn = document.getElementById('stop');
+    const recenterBtn = document.getElementById('recenter');
+    const useMyPosBtn = document.getElementById('use-my-pos');
+    const latInput = document.getElementById('circle-lat');
+    const lngInput = document.getElementById('circle-lng');
+    const radiusInput = document.getElementById('circle-radius');
+    const addCircleBtn = document.getElementById('add-circle');
+    const clearCirclesBtn = document.getElementById('clear-circles');
+
+    // Helper: set status text
+    function setStatus(msg) { statusEl.textContent = 'Status: ' + msg; }
+
+    // Helper: create or update user layers
+    function updateUserPosition(pos) {
+      const { latitude, longitude, accuracy, heading, speed } = pos.coords;
+      const latlng = [latitude, longitude];
+
+      if (!userMarker) {
+        userMarker = L.circleMarker(latlng, {
+          radius: 7,
+          color: '#0b5ed7',
+          fillColor: '#0b5ed7',
+          fillOpacity: 1
+        }).addTo(map);
+
+        accuracyCircle = L.circle(latlng, {
+          radius: accuracy || 0,
+          color: '#0b5ed7',
+          fillColor: '#0b5ed7',
+          fillOpacity: 0.1,
+          weight: 1
+        }).addTo(map);
+      } else {
+        userMarker.setLatLng(latlng);
+        accuracyCircle.setLatLng(latlng).setRadius(accuracy || 0);
+      }
+
+      // Heading arrow (if heading is a number 0..360)
+      if (typeof heading === 'number' && !Number.isNaN(heading) && speed && speed > 0.2) {
+        const length = 25; // meters
+        const dest = destinationPoint(latitude, longitude, heading, length);
+        const latlng2 = [dest.lat, dest.lng];
+
+        if (!headingArrow) {
+          headingArrow = L.polyline([latlng, latlng2], { color: '#0b5ed7', weight: 2 }).addTo(map);
+        } else {
+          headingArrow.setLatLngs([latlng, latlng2]);
+        }
+      } else if (headingArrow) {
+        headingArrow.remove();
+        headingArrow = null;
+      }
+
+      useMyPosBtn.disabled = false;
+      recenterBtn.disabled = false;
+    }
+
+    // Compute destination point given start lat/lng, bearing (deg), distance (m).
+    function destinationPoint(lat, lng, bearingDeg, distanceMeters) {
+      const R = 6371000; // earth radius (m)
+      const φ1 = lat * Math.PI/180;
+      const λ1 = lng * Math.PI/180;
+      const θ = bearingDeg * Math.PI/180;
+      const δ = distanceMeters / R;
+
+      const sinφ1 = Math.sin(φ1), cosφ1 = Math.cos(φ1);
+      const sinδ = Math.sin(δ), cosδ = Math.cos(δ);
+
+      const sinφ2 = sinφ1 * cosδ + cosφ1 * sinδ * Math.cos(θ);
+      const φ2 = Math.asin(sinφ2);
+      const y = Math.sin(θ) * sinδ * cosφ1;
+      const x = cosδ - sinφ1 * sinφ2;
+      const λ2 = λ1 + Math.atan2(y, x);
+
+      return { lat: φ2 * 180/Math.PI, lng: ((λ2 * 180/Math.PI + 540) % 360) - 180 };
+    }
+
+    // --- Geolocation watch ---
+    function startTracking() {
+      if (!('geolocation' in navigator)) {
+        setStatus('Geolocation not supported');
+        return;
+      }
+      if (watchId !== null) return;
+
+      setStatus('Requesting location...');
+      watchId = navigator.geolocation.watchPosition(
+        (pos) => {
+          updateUserPosition(pos);
+          const latlng = [pos.coords.latitude, pos.coords.longitude];
+          // First fix: fit map to a nice zoom if still default
+          if (!map._userHasMoved) {
+            map.setView(latlng, Math.max(map.getZoom(), 16), { animate: true });
+          }
+          setStatus(`Fix: ${latlng[0].toFixed(5)}, ${latlng[1].toFixed(5)} ±${Math.round(pos.coords.accuracy)}m`);
+        },
+        (err) => {
+          setStatus('Error: ' + err.message);
+          console.error(err);
+        },
+        {
+          enableHighAccuracy: true, // try GPS
+          maximumAge: 5000,         // accept up to 5s cached
+          timeout: 20000            // 20s timeout
+        }
+      );
+
+      startBtn.disabled = true;
+      stopBtn.disabled = false;
+    }
+
+    function stopTracking() {
+      if (watchId !== null) {
+        navigator.geolocation.clearWatch(watchId);
+        watchId = null;
+        setStatus('Tracking stopped');
+      }
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
+      // Keep layers on map so you can still recenter/use coords
+    }
+
+    // --- Circle handling ---
+    function addCircleAt(lat, lng, radiusMeters) {
+      if (!Number.isFinite(lat) || !Number.isFinite(lng) || !Number.isFinite(radiusMeters) || radiusMeters <= 0) {
+        alert('Please provide valid latitude, longitude, and positive radius in meters.');
+        return;
+      }
+      const circle = L.circle([lat, lng], {
+        radius: radiusMeters,
+        color: '#d63384',
+        fillColor: '#d63384',
+        fillOpacity: 0.1,
+        weight: 2
+      }).addTo(geofenceGroup);
+
+      // Optional label
+      circle.bindPopup(`Circle<br>Lat: ${lat.toFixed(5)}<br>Lng: ${lng.toFixed(5)}<br>R: ${Math.round(radiusMeters)} m`);
+
+      // Fit bounds if this is the first circle
+      if (geofenceGroup.getLayers().length === 1) {
+        map.fitBounds(geofenceGroup.getBounds().pad(0.25));
+      }
+    }
+
+    // Long-press to add a circle where you press
+    let pressTimer = null;
+    map.on('mousedown touchstart', (e) => {
+      pressTimer = setTimeout(() => {
+        const r = parseFloat(radiusInput.value) || 100;
+        addCircleAt(e.latlng.lat, e.latlng.lng, r);
+      }, 600); // long-press threshold (ms)
+    });
+    map.on('mouseup touchend dragstart move', () => {
+      if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
+    });
+
+    // Track map movement to avoid re-centering after user drags
+    map.on('movestart', () => { map._userHasMoved = true; });
+
+    // --- Wire up controls ---
+    startBtn.addEventListener('click', startTracking);
+    stopBtn.addEventListener('click', stopTracking);
+    recenterBtn.addEventListener('click', () => {
+      if (userMarker) { map.setView(userMarker.getLatLng(), Math.max(map.getZoom(), 16), { animate: true }); }
+    });
+
+    addCircleBtn.addEventListener('click', () => {
+      const lat = parseFloat(latInput.value);
+      const lng = parseFloat(lngInput.value);
+      const rad = parseFloat(radiusInput.value);
+      addCircleAt(lat, lng, rad);
+    });
+
+    clearCirclesBtn.addEventListener('click', () => {
+      geofenceGroup.clearLayers();
+    });
+
+    useMyPosBtn.addEventListener('click', () => {
+      if (!userMarker) return;
+      const { lat, lng } = userMarker.getLatLng();
+      latInput.value = lat.toFixed(6);
+      lngInput.value = lng.toFixed(6);
+    });
+
+    // Start immediately for convenience (you can remove this if you prefer manual)
+    startTracking();
+  </script>
+</body>
+</html>
+``
